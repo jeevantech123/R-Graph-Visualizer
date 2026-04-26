@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>R Graph Generator</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Easy R Graph Generator</h1>
+      <p>You can easily generate all basic R graphs on this page. Use the graph type dropwdown to get started.</p>
+      <p>I made this so that I can punch in simple data to visualize it without having to boot up R.</p>
+    </header>
+
+    <div class="card">
+      <div class="row">
+        <div class="col">
+          <label for="graph-type">Graph type</label>
+          <select id="graph-type">
+            <option value="histogram">Histogram</option>
+            <option value="boxplot">Box plot</option>
+            <option value="barplot">Bar chart</option>
+            <option value="scatter">Scatter plot</option>
+            <option value="lineplot">Line chart</option>
+            <option value="density">Density plot</option>
+            <option value="pie">Pie chart</option>
+            <option value="dotplot">Dot plot (Cleveland)</option>
+            <option value="qqplot">Q-Q plot (normality)</option>
+            <option value="heatmap">Heatmap</option>
+          </select>
+        </div>
+        <div class="col" id="color-col">
+          <label for="bar-color">Bar / point color</label>
+          <select id="bar-color">
+            <option value="steelblue">Steel blue</option>
+            <option value="tomato">Tomato red</option>
+            <option value="seagreen">Sea green</option>
+            <option value="mediumpurple">Purple</option>
+            <option value="orange">Orange</option>
+            <option value="slategray">Slate gray</option>
+            <option value="hotpink">Hot pink</option>
+            <option value="goldenrod">Goldenrod</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Single numeric input -->
+      <div id="single-input" style="margin-bottom:1.25rem;">
+        <label for="data-input" id="data-label">Data values (comma or space separated)</label>
+        <textarea id="data-input" rows="3" placeholder="e.g. 12, 15, 23, 8, 19, 42, 31, 7, 28, 35, 14, 22"></textarea>
+      </div>
+
+      <!-- X/Y input -->
+      <div id="xy-input" style="display:none; margin-bottom:1.25rem;">
+        <div class="two-col">
+          <div>
+            <label for="x-input">X values</label>
+            <textarea id="x-input" rows="3" placeholder="1, 2, 3, 4, 5"></textarea>
+          </div>
+          <div>
+            <label for="y-input">Y values</label>
+            <textarea id="y-input" rows="3" placeholder="2.1, 3.8, 5.2, 4.6, 7.1"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bar / Pie input -->
+      <div id="bar-input" style="display:none; margin-bottom:1.25rem;">
+        <div class="two-col">
+          <div>
+            <label for="bar-labels">Labels (comma separated)</label>
+            <textarea id="bar-labels" rows="3" placeholder="A, B, C, D, E"></textarea>
+          </div>
+          <div>
+            <label for="bar-values">Values (comma separated)</label>
+            <textarea id="bar-values" rows="3" placeholder="12, 25, 18, 30, 9"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col">
+          <label for="hist-title">Chart title</label>
+          <input type="text" id="hist-title" placeholder="My chart" />
+        </div>
+
+        <div class="col" id="bins-wrap">
+          <label>Bins: <span id="bins-out">10</span></label>
+          <div class="slider-row">
+            <input type="range" id="bins" min="2" max="99" value="10" step="1" />
+            <span class="slider-val" id="bins-val">10</span>
+          </div>
+        </div>
+
+        <div class="col" id="extra-opt-wrap" style="display:none;">
+          <label id="extra-label">Option</label>
+          <div class="checkbox-row">
+            <input type="checkbox" id="extra-check" />
+            <span id="extra-check-label">Show points</span>
+          </div>
+        </div>
+      </div>
+
+      <button id="run-btn" disabled>Loading R...</button>
+      <div id="status">Loading R engine... (first load may take ~15 seconds)</div>
+
+      <div id="plot-area">
+        <span class="placeholder">Your plot will appear here</span>
+      </div>
+
+      <div id="stats-area"></div>
+    </div>
+
+    <footer>
+      Powered by <a href="https://docs.r-wasm.org/webr/latest/" target="_blank">WebR.</a>
+    </footer>
+  </div>
+
+  <script type="module">
+    import { WebR } from 'https://webr.r-wasm.org/v0.4.2/webr.mjs';
+    window.WebR = { WebR };
+    window.dispatchEvent(new Event('webr-loaded'));
+  </script>
+
+  <script>
+    let webR;
+    const btn = document.getElementById('run-btn');
+    const status = document.getElementById('status');
+    const binsSlider = document.getElementById('bins');
+    const binsOut = document.getElementById('bins-out');
+    const binsVal = document.getElementById('bins-val');
+    const graphType = document.getElementById('graph-type');
+
+    binsSlider.addEventListener('input', () => {
+      binsOut.textContent = binsSlider.value;
+      binsVal.textContent = binsSlider.value;
+    });
+
+    const singleInput = document.getElementById('single-input');
+    const xyInput = document.getElementById('xy-input');
+    const barInput = document.getElementById('bar-input');
+    const binsWrap = document.getElementById('bins-wrap');
+    const extraWrap = document.getElementById('extra-opt-wrap');
+    const extraLabel = document.getElementById('extra-label');
+    const extraCheckLabel = document.getElementById('extra-check-label');
+    const colorCol = document.getElementById('color-col');
+
+    const xyTypes = ['scatter', 'lineplot'];
+    const barTypes = ['barplot', 'pie'];
+
+    graphType.addEventListener('change', () => {
+      const t = graphType.value;
+      singleInput.style.display = (xyTypes.includes(t) || barTypes.includes(t)) ? 'none' : 'block';
+      xyInput.style.display = xyTypes.includes(t) ? 'block' : 'none';
+      barInput.style.display = barTypes.includes(t) ? 'block' : 'none';
+      binsWrap.style.display = t === 'histogram' ? 'block' : 'none';
+      extraWrap.style.display = (t === 'scatter' || t === 'density' || t === 'lineplot') ? 'block' : 'none';
+      colorCol.style.display = (t === 'heatmap' || t === 'qqplot' || t === 'pie') ? 'none' : 'block';
+      if (t === 'scatter') { extraLabel.textContent = 'Option'; extraCheckLabel.textContent = 'Show regression line'; }
+      if (t === 'density') { extraLabel.textContent = 'Option'; extraCheckLabel.textContent = 'Fill area under curve'; }
+      if (t === 'lineplot') { extraLabel.textContent = 'Option'; extraCheckLabel.textContent = 'Show data points'; }
+    });
+
+    function parseNums(str) {
+      return str.trim().split(/[\s,]+/).map(Number).filter(n => !isNaN(n));
+    }
+    function parseStrings(str) {
+      return str.trim().split(',').map(s => s.trim()).filter(Boolean);
+    }
+
+    async function initWebR() {
+      try {
+        await new Promise((resolve) => {
+          if (window.WebR) return resolve();
+          window.addEventListener('webr-loaded', resolve, { once: true });
+        });
+        webR = new window.WebR.WebR();
+        await webR.init();
+        status.textContent = 'R is ready!';
+        status.className = '';
+        btn.textContent = 'Generate plot';
+        btn.disabled = false;
+        setTimeout(() => { status.textContent = ''; }, 2500);
+      } catch (e) {
+        status.textContent = 'Failed to load R: ' + e.message;
+        status.className = 'error';
+      }
+    }
+
+    async function renderPlot(rCode) {
+      const result = await webR.evalR(rCode);
+      const pngPath = await result.toJs();
+      const filePath = pngPath.values[0];
+
+      const rawResult = await webR.evalR(`
+        con <- file("${filePath}", "rb")
+        raw_bytes <- readBin(con, what="raw", n=2e6)
+        close(con)
+        as.integer(raw_bytes)
+      `);
+      const rawJs = await rawResult.toJs();
+      const bytes = new Uint8Array(rawJs.values);
+
+      // btoa in chunks to avoid call stack overflow on large images
+      let binary = '';
+      const chunkSize = 8192;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+      }
+      const b64 = btoa(binary);
+
+      const plotArea = document.getElementById('plot-area');
+      plotArea.innerHTML = '';
+      const img = document.createElement('img');
+      img.src = `data:image/png;base64,${b64}`;
+      img.alt = 'R plot';
+      plotArea.appendChild(img);
+    }
+
+    function showStats(items) {
+      const area = document.getElementById('stats-area');
+      area.style.display = 'grid';
+      area.innerHTML = items.map(i => `
+        <div class="stat-card">
+          <div class="stat-label">${i.label}</div>
+          <div class="stat-val">${i.val !== undefined && i.val !== null ? i.val : '—'}</div>
+        </div>
+      `).join('');
+    }
+
+    async function evalStats(rExpr) {
+      const shelter = await webR.evalR(rExpr);
+      const js = await shelter.toJs();
+      const out = {};
+      // WebR named list: { type, names: [...], values: [{type, names, values}, ...] }
+      if (js && Array.isArray(js.names) && Array.isArray(js.values)) {
+        js.names.forEach((name, i) => {
+          const v = js.values[i];
+          // Each value is itself a WebR vector object with a .values array
+          if (v && Array.isArray(v.values)) {
+            out[name] = v.values[0];
+          } else if (v && v.value !== undefined) {
+            out[name] = v.value;
+          } else {
+            out[name] = v;
+          }
+        });
+      }
+      return out;
+    }
+
+    btn.addEventListener('click', async () => {
+      const t = graphType.value;
+      const color = document.getElementById('bar-color').value;
+      const title = (document.getElementById('hist-title').value || 'My chart').replace(/"/g, '\\"');
+      const extraCheck = document.getElementById('extra-check').checked;
+      const bins = parseInt(binsSlider.value);
+
+      btn.disabled = true;
+      btn.textContent = 'Running R...';
+      status.textContent = '';
+      status.className = '';
+
+      const pngSetup = `png_file <- tempfile(fileext=".png"); png(png_file, width=740, height=420, bg="white"); par(mar=c(4,4,2.5,1), family="sans")`;
+      const pngEnd = `invisible(dev.off()); png_file`;
+
+      try {
+        if (t === 'histogram') {
+          const nums = parseNums(document.getElementById('data-input').value);
+          if (nums.length < 2) throw new Error('Enter at least 2 numbers.');
+          await renderPlot(`
+            x <- c(${nums.join(',')})
+            ${pngSetup}
+            hist(x, breaks=${bins}, col="${color}", border="white", main="${title}", xlab="Values", ylab="Frequency", las=1)
+            box(col="#cccccc")
+            ${pngEnd}
+          `);
+          const g1 = await evalStats(`x<-c(${nums.join(',')});list(n=length(x),mean=round(mean(x),3),sd=round(sd(x),3),min=min(x),max=max(x),median=median(x))`);
+          showStats([{label:'n',val:g1.n},{label:'mean',val:g1.mean},{label:'median',val:g1.median},{label:'std dev',val:g1.sd},{label:'min',val:g1.min},{label:'max',val:g1.max}]);
+
+        } else if (t === 'boxplot') {
+          const nums = parseNums(document.getElementById('data-input').value);
+          if (nums.length < 2) throw new Error('Enter at least 2 numbers.');
+          await renderPlot(`
+            x <- c(${nums.join(',')})
+            ${pngSetup}
+            boxplot(x, col="${color}", border="#555", main="${title}", ylab="Values", notch=FALSE)
+            ${pngEnd}
+          `);
+          const g2 = await evalStats(`x<-c(${nums.join(',')});list(n=length(x),q1=round(quantile(x,0.25),3),median=round(median(x),3),q3=round(quantile(x,0.75),3),min=min(x),max=max(x))`);
+          showStats([{label:'n',val:g2.n},{label:'Q1',val:g2.q1},{label:'median',val:g2.median},{label:'Q3',val:g2.q3},{label:'min',val:g2.min},{label:'max',val:g2.max}]);
+
+        } else if (t === 'barplot') {
+          const labels = parseStrings(document.getElementById('bar-labels').value);
+          const vals = parseNums(document.getElementById('bar-values').value);
+          if (!labels.length || !vals.length) throw new Error('Enter labels and values.');
+          const lblStr = labels.map(l => `"${l.replace(/"/g,'\\"')}"`).join(',');
+          await renderPlot(`
+            vals <- c(${vals.join(',')})
+            labs <- c(${lblStr})
+            ${pngSetup}
+            barplot(vals, names.arg=labs, col="${color}", border="white", main="${title}", ylab="Value", las=1)
+            ${pngEnd}
+          `);
+          showStats([{label:'total',val:vals.reduce((a,b)=>a+b,0).toFixed(2)},{label:'max',val:Math.max(...vals)},{label:'min',val:Math.min(...vals)},{label:'mean',val:(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(2)}]);
+
+        } else if (t === 'scatter') {
+          const xs = parseNums(document.getElementById('x-input').value);
+          const ys = parseNums(document.getElementById('y-input').value);
+          if (xs.length < 2 || ys.length < 2) throw new Error('Enter at least 2 X and Y values.');
+          const n = Math.min(xs.length, ys.length);
+          const regLine = extraCheck ? `abline(lm(y~x), col="tomato", lwd=2)` : '';
+          await renderPlot(`
+            x <- c(${xs.slice(0,n).join(',')})
+            y <- c(${ys.slice(0,n).join(',')})
+            ${pngSetup}
+            plot(x, y, col="${color}", pch=19, cex=1.2, main="${title}", xlab="X", ylab="Y", las=1)
+            ${regLine}
+            ${pngEnd}
+          `);
+          const g3 = await evalStats(`x<-c(${xs.slice(0,n).join(',')});y<-c(${ys.slice(0,n).join(',')});list(n=length(x),cor=round(cor(x,y),3))`);
+          showStats([{label:'n',val:g3.n},{label:'correlation r',val:g3.cor}]);
+
+        } else if (t === 'lineplot') {
+          const xs = parseNums(document.getElementById('x-input').value);
+          const ys = parseNums(document.getElementById('y-input').value);
+          if (xs.length < 2 || ys.length < 2) throw new Error('Enter at least 2 X and Y values.');
+          const n = Math.min(xs.length, ys.length);
+          const pts = extraCheck ? `points(x, y, col="${color}", pch=19, cex=1.1)` : '';
+          await renderPlot(`
+            x <- c(${xs.slice(0,n).join(',')})
+            y <- c(${ys.slice(0,n).join(',')})
+            ${pngSetup}
+            plot(x, y, type="l", col="${color}", lwd=2.5, main="${title}", xlab="X", ylab="Y", las=1)
+            ${pts}
+            ${pngEnd}
+          `);
+          showStats([{label:'n points',val:n},{label:'x range',val:`${Math.min(...xs.slice(0,n))} – ${Math.max(...xs.slice(0,n))}`},{label:'y range',val:`${Math.min(...ys.slice(0,n))} – ${Math.max(...ys.slice(0,n))}`}]);
+
+        } else if (t === 'density') {
+          const nums = parseNums(document.getElementById('data-input').value);
+          if (nums.length < 3) throw new Error('Enter at least 3 numbers.');
+          const fillCode = extraCheck ? `polygon(d, col=adjustcolor("${color}",alpha.f=0.25), border=NA)` : '';
+          await renderPlot(`
+            x <- c(${nums.join(',')})
+            d <- density(x)
+            ${pngSetup}
+            plot(d, col="${color}", lwd=2.5, main="${title}", xlab="Values", las=1)
+            ${fillCode}
+            ${pngEnd}
+          `);
+          const g4 = await evalStats(`x<-c(${nums.join(',')});list(n=length(x),mean=round(mean(x),3),sd=round(sd(x),3),skew=round((mean(x)-median(x))/sd(x),3))`);
+          showStats([{label:'n',val:g4.n},{label:'mean',val:g4.mean},{label:'std dev',val:g4.sd},{label:'skewness',val:g4.skew}]);
+
+        } else if (t === 'pie') {
+          const labels = parseStrings(document.getElementById('bar-labels').value);
+          const vals = parseNums(document.getElementById('bar-values').value);
+          if (!labels.length || !vals.length) throw new Error('Enter labels and values.');
+          const lblStr = labels.map(l => `"${l.replace(/"/g,'\\"')}"`).join(',');
+          await renderPlot(`
+            vals <- c(${vals.join(',')})
+            labs <- c(${lblStr})
+            pal <- c("steelblue","tomato","seagreen","mediumpurple","orange","slategray","hotpink","goldenrod")
+            ${pngSetup}
+            pie(vals, labels=paste0(labs," (",round(vals/sum(vals)*100,1),"%)"), col=pal[1:length(vals)], main="${title}", border="white")
+            ${pngEnd}
+          `);
+          showStats([{label:'total',val:vals.reduce((a,b)=>a+b,0)},{label:'segments',val:labels.length},{label:'largest',val:labels[vals.indexOf(Math.max(...vals))]||'—'}]);
+
+        } else if (t === 'dotplot') {
+          const nums = parseNums(document.getElementById('data-input').value);
+          if (nums.length < 2) throw new Error('Enter at least 2 numbers.');
+          await renderPlot(`
+            x <- sort(c(${nums.join(',')}))
+            ${pngSetup}
+            dotchart(x, pch=19, col="${color}", main="${title}", xlab="Values")
+            ${pngEnd}
+          `);
+          showStats([{label:'n',val:nums.length},{label:'min',val:Math.min(...nums)},{label:'max',val:Math.max(...nums)},{label:'range',val:(Math.max(...nums)-Math.min(...nums)).toFixed(2)}]);
+
+        } else if (t === 'qqplot') {
+          const nums = parseNums(document.getElementById('data-input').value);
+          if (nums.length < 5) throw new Error('Enter at least 5 numbers.');
+          await renderPlot(`
+            x <- c(${nums.join(',')})
+            ${pngSetup}
+            qqnorm(x, pch=19, col="steelblue", main="${title || 'Normal Q-Q plot'}", las=1)
+            qqline(x, col="tomato", lwd=2)
+            ${pngEnd}
+          `);
+          const g5 = await evalStats(`x<-c(${nums.join(',')});sw<-shapiro.test(x);list(stat=round(sw$statistic,4),pval=round(sw$p.value,4))`);
+          showStats([{label:'Shapiro-Wilk W',val:g5.stat},{label:'p-value',val:g5.pval},{label:'normality',val:parseFloat(g5.pval)>0.05?'likely normal':'likely non-normal'}]);
+
+        } else if (t === 'heatmap') {
+          const nums = parseNums(document.getElementById('data-input').value);
+          if (nums.length < 4) throw new Error('Enter at least 4 numbers.');
+          await renderPlot(`
+            x <- c(${nums.join(',')})
+            sz <- min(floor(sqrt(length(x))), 8)
+            m <- matrix(x[1:(sz*sz)], nrow=sz)
+            ${pngSetup}
+            image(1:sz, 1:sz, m, col=colorRampPalette(c("white","steelblue","navy"))(64), main="${title || 'Heatmap'}", xlab="Column", ylab="Row", las=1)
+            ${pngEnd}
+          `);
+          const sz = Math.min(Math.floor(Math.sqrt(nums.length)), 8);
+          showStats([{label:'values used',val:sz*sz},{label:'grid size',val:`${sz} × ${sz}`},{label:'min',val:Math.min(...nums).toFixed(2)},{label:'max',val:Math.max(...nums).toFixed(2)}]);
+        }
+
+        status.textContent = '';
+      } catch (e) {
+        status.textContent = e.message || String(e);
+        status.className = 'error';
+      }
+
+      btn.disabled = false;
+      btn.textContent = 'Generate plot';
+    });
+
+    initWebR();
+  </script>
+</body>
+</html>
